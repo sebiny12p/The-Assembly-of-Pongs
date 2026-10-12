@@ -258,7 +258,7 @@ draw_pixel:
 ; delay: game speed regulation loop
 ; ==============================================================================
 delay:
-    leti r10, 25000
+    leti r10, 2000
 delay_l:
     subi r10, r10, 1
     bgtz r10, delay_l
