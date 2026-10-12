@@ -34,7 +34,8 @@ ball_old_y:    .word 30
 ball_dx:       .word 1          ; Ball horizontal velocity (+1 or -1)
 ball_dy:       .word 1          ; Ball vertical velocity (-1, 0, or +1)
 
-bot_tick:      .word 0          ; Frame counter for bot handicap
+bot_tick:          .word 0      ; Continuous frame counter
+bot_target_offset: .word 4      ; Active paddle hit target (1=top, 4=center, 7=bottom)
 
 ; ==============================================================================
 ; MAIN ENTRY POINT
@@ -73,6 +74,9 @@ serve_round:
     leti r1, 0
     store [bot_tick], r1
     store [rally_count], r1
+
+    leti r1, 4
+    store [bot_target_offset], r1
 
     ; Set initial speed delay based on difficulty
     load r2, [difficulty]
@@ -119,6 +123,11 @@ save_speed:
 ; MAIN GAME LOOP
 ; ==============================================================================
 game_loop:
+    ; Continuous frame clock increment for random seed
+    load r4, [bot_tick]
+    addi r4, r4, 1
+    store [bot_tick], r4
+
     ; --------------------------------------------------------------------------
     ; 1. READ INPUT CONTROLLER (MMIO at 0xC0000000)
     ; Up / W = -1, Down / S = 1, Restart (R/Space) = 2, Keys 1..4 = 11..14
@@ -169,7 +178,7 @@ save_p1:
 
 apply_bot:
     ; --------------------------------------------------------------------------
-    ; 2. BOT AI WITH CONFIGURABLE DIFFICULTY
+    ; 2. BOT AI WITH DYNAMIC SHOT VARIATION & TRACKING
     ; --------------------------------------------------------------------------
     load r6, [p2_y]
     store [p2_old_y], r6
@@ -180,35 +189,31 @@ apply_bot:
     load r1, [ball_x]
     load r7, [difficulty]
 
+    load r8, [bot_tick]
+
     ; --- Difficulty 1: Easy ---
-    leti r8, 1
-    bne  r7, r8, check_diff_2
+    leti r9, 1
+    bne  r7, r9, check_diff_2
     leti r5, 52                 ; Only track when ball is close
     blt  r1, r5, move_ball
-    load r8, [bot_tick]
-    addi r8, r8, 1
-    store [bot_tick], r8
     modi r8, r8, 3              ; Moves 1 out of 3 frames (sluggish)
     bnez r8, move_ball
     bra  bot_track
 
 check_diff_2:
     ; --- Difficulty 2: Normal ---
-    leti r8, 2
-    bne  r7, r8, check_diff_3
+    leti r9, 2
+    bne  r7, r9, check_diff_3
     leti r5, 35                 ; Half-court tracking
     blt  r1, r5, move_ball
-    load r8, [bot_tick]
-    addi r8, r8, 1
-    store [bot_tick], r8
     modi r8, r8, 2              ; Moves 1 out of 2 frames
     bnez r8, move_ball
     bra  bot_track
 
 check_diff_3:
     ; --- Difficulty 3: Hard ---
-    leti r8, 3
-    bne  r7, r8, check_diff_4
+    leti r9, 3
+    bne  r7, r9, check_diff_4
     leti r5, 15                 ; Reacts almost immediately
     blt  r1, r5, move_ball
     bra  bot_track
@@ -219,7 +224,8 @@ check_diff_4:
 
 bot_track:
     load r7, [ball_y]
-    addi r8, r6, 4              ; Center of bot paddle
+    load r9, [bot_target_offset] ; Dynamic hit point (1=top, 4=center, 7=bottom)
+    add  r8, r6, r9              ; Target y = p2_y + bot_target_offset
     blt  r7, r8, bot_up
     bgt  r7, r8, bot_down
     bra  move_ball
@@ -304,6 +310,32 @@ p1_slice_bot:
 save_p1_dy:
     store [ball_dy], r4
     call on_rally_hit
+
+    ; --- AI DYNAMIC SHOT SELECTION ---
+    ; Randomize bot hit target offset for this rally (top, flat, or bottom)
+    load r8, [bot_tick]
+    load r9, [ball_y]
+    muli r9, r9, 3
+    add  r8, r8, r9
+    modi r8, r8, 3              ; 0, 1, or 2
+    leti r9, 0
+    beq  r8, r9, pick_bot_top
+    leti r9, 1
+    beq  r8, r9, pick_bot_bot
+    ; Remainder 2: center shot (laser flat return)
+    leti r9, 4
+    bra  set_bot_offset
+
+pick_bot_top:
+    leti r9, 1                  ; Aim top -> returns angled UP (-1)
+    bra  set_bot_offset
+
+pick_bot_bot:
+    leti r9, 7                  ; Aim bottom -> returns angled DOWN (+1)
+
+set_bot_offset:
+    store [bot_target_offset], r9
+
     bra  render_frame
 
 check_goal_left:
