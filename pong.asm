@@ -244,54 +244,62 @@ move_ball:
     ble  r2, r5, bounce_y
     leti r5, 58
     bge  r2, r5, bounce_y
-    bra  check_paddle1
+    bra  check_collisions
 
 bounce_y:
     sub  r4, r0, r4             ; Negate ball_dy
     store [ball_dy], r4
 
-check_paddle1:
-    ; --------------------------------------------------------------------------
-    ; 4. PADDLE 1 COLLISION (LEFT: x <= 3)
-    ; --------------------------------------------------------------------------
+check_collisions:
+    ; Check ball direction: Left (dx < 0) or Right (dx > 0)
+    bgtz r3, check_paddle_right
+
+    ; --- Ball Moving LEFT towards Player 1 ---
     leti r5, 3
-    bgt  r1, r5, check_paddle2
+    bne  r1, r5, check_goal_left
 
+    ; Ball is at x == 3: Check if Paddle 1 intercepts!
     load r6, [p1_y]
-    blt  r2, r6, player_loses   ; Ball past paddle -> FAIL STATE!
+    blt  r2, r6, check_goal_left     ; Ball above paddle -> keep flying past!
     addi r7, r6, 10
-    bgt  r2, r7, player_loses   ; Ball past paddle -> FAIL STATE!
+    bge  r2, r7, check_goal_left     ; Ball below paddle -> keep flying past!
 
-    ; Deflection bounce!
+    ; Paddle 1 Deflection Bounce!
     leti r3, 1
     store [ball_dx], r3
     leti r1, 4
-
-    ; Rally speedup in Very Hard mode!
     call on_rally_hit
-    bra  store_ball
+    bra  render_frame
 
-check_paddle2:
-    ; --------------------------------------------------------------------------
-    ; 5. PADDLE 2 COLLISION (RIGHT: x >= 76)
-    ; --------------------------------------------------------------------------
+check_goal_left:
+    ; Ball missed paddle! Did it hit the back goal wall (x <= 0)?
+    blez r1, player_loses_goal
+    bra  render_frame
+
+check_paddle_right:
+    ; --- Ball Moving RIGHT towards AI Bot ---
     leti r5, 76
-    blt  r1, r5, store_ball
+    bne  r1, r5, check_goal_right
 
+    ; Ball is at x == 76: Check if Paddle 2 intercepts!
     load r6, [p2_y]
-    blt  r2, r6, ai_loses       ; Ball past AI -> VICTORY STATE!
+    blt  r2, r6, check_goal_right    ; Ball above paddle -> keep flying past!
     addi r7, r6, 10
-    bgt  r2, r7, ai_loses       ; Ball past AI -> VICTORY STATE!
+    bge  r2, r7, check_goal_right    ; Ball below paddle -> keep flying past!
 
-    ; Deflection bounce!
+    ; Paddle 2 Deflection Bounce!
     subi r3, r0, 1
     store [ball_dx], r3
     leti r1, 75
-
-    ; Rally speedup in Very Hard mode!
     call on_rally_hit
+    bra  render_frame
 
-store_ball:
+check_goal_right:
+    ; Ball missed AI! Did it hit the back goal wall (x >= 79)?
+    leti r5, 79
+    bge  r1, r5, ai_loses_goal
+
+render_frame:
     store [ball_x], r1
     store [ball_y], r2
 
@@ -329,6 +337,36 @@ store_ball:
     call delay
 
     bra  game_loop
+
+player_loses_goal:
+    ; Draw ball hitting back wall at x=0
+    store [ball_x], r1
+    store [ball_y], r2
+    load r1, [ball_old_x]
+    load r2, [ball_old_y]
+    leti r3, 0x00000000
+    call draw_pixel
+    load r1, [ball_x]
+    load r2, [ball_y]
+    leti r3, 0xFFFF0000
+    call draw_pixel
+    call delay
+    bra  player_loses
+
+ai_loses_goal:
+    ; Draw ball hitting back wall at x=79
+    store [ball_x], r1
+    store [ball_y], r2
+    load r1, [ball_old_x]
+    load r2, [ball_old_y]
+    leti r3, 0x00000000
+    call draw_pixel
+    load r1, [ball_x]
+    load r2, [ball_y]
+    leti r3, 0xFFFF0000
+    call draw_pixel
+    call delay
+    bra  ai_loses
 
 ; ==============================================================================
 ; DYNAMIC SPEED ACCELERATION (Very Hard Mode)
