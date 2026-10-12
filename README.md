@@ -5,6 +5,7 @@ Classic Pong rebuilt from scratch in 100% pure 32-bit RISC Assembly. Featuring a
 ![Language](https://img.shields.io/badge/Language-Assembly_(SCAT_RISC)-blue.svg)
 ![Architecture](https://img.shields.io/badge/Architecture-von_Neumann_32--bit-orange.svg)
 ![Display](https://img.shields.io/badge/Display-80x60_VRAM_MMIO-brightgreen.svg)
+![Platform](https://img.shields.io/badge/Platform-Windows_%7C_macOS_%7C_Linux-lightgrey.svg)
 
 ---
 
@@ -58,21 +59,35 @@ Classic Pong rebuilt from scratch in 100% pure 32-bit RISC Assembly. Featuring a
 
 ---
 
-## 🚀 How to Run
+## 🚀 How to Run (Cross-Platform)
+
+The game runs identically across **Windows**, **macOS**, and **Linux** through Python 3.
 
 ### 1. Prerequisites
-* Python 3.8+
-* Tkinter (included by default with standard Python on Windows/Mac/Linux)
+* **Python 3.8+**
+* **Tkinter**:
+  * **Windows / macOS**: Included by default with Python.
+  * **Linux (Ubuntu/Debian)**: If missing, install via `sudo apt install python3-tk`.
 
 ### 2. Assemble the Game
-```powershell
-python scat/asm.py pong.asm
-```
+- **Windows (PowerShell)**:
+  ```powershell
+  python scat/asm.py pong.asm
+  ```
+- **macOS / Linux**:
+  ```bash
+  python3 scat/asm.py pong.asm
+  ```
 
 ### 3. Launch the Simulator
-```powershell
-python scat/sim.py pong.scat
-```
+- **Windows (PowerShell)**:
+  ```powershell
+  python scat/sim.py pong.scat
+  ```
+- **macOS / Linux**:
+  ```bash
+  python3 scat/sim.py pong.scat
+  ```
 
 ### 4. Play
 1. In the simulator terminal prompt `(sim)`, type:
