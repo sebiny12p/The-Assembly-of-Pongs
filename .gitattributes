@@ -1,0 +1,3 @@
+# Mark simulator runtime as vendored so GitHub recognizes the project as 100% Assembly
+scat/* linguist-vendored
+scat/** linguist-vendored
