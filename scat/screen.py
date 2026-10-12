@@ -68,7 +68,7 @@ class GUI(tk.Tk):
     #         self.after_cancel(after_id)
 
     def update(self):
-        self.after(30,self.update) # 30 ms ~ 100FPS
+        self.after(16,self.update) # 16 ms ~ 60 FPS
         try:
             super().update()
         except tk.TclError: # happens e.g. when the window is closed
