@@ -1,15 +1,17 @@
 ; ==============================================================================
-; THE ASSEMBLY OF PONGS - HIGH PERFORMANCE RETRO ARCADE
-; Player 1 (Left, Cyan): W / S or Up / Down arrow keys
-; Bot AI (Right, Magenta): 4 Difficulty levels (Easy, Normal, Hard, Very Hard)
-; Restart Match: Press R / Space anytime or after game over
-; Change Difficulty: Press 1, 2, 3, or 4 anytime or at game over
-;   - 1 = Easy      : Sluggish bot, narrow reaction zone, slow pace
-;   - 2 = Normal    : Balanced AI, half-court tracking
-;   - 3 = Hard      : Fast bot, full-court tracking
-;   - 4 = Very Hard : Aggressive bot + DYNAMIC SPEED ACCELERATION on every rally!
-; Rendering: Ultra-smooth delta-rendering (updates paddle ends only, 60 FPS)
-; Win / Fail States: Border flashes RED (Loss) or GREEN (Win), press R to replay!
+; THE ASSEMBLY OF PONGS - COMPLETE RETRO ARCADE CHAMPIONSHIP
+; Features:
+;   - First to 3 Points Match System
+;   - Clean, minimalist LED score pips on the top border (No UI clutter!)
+;   - Paddle Aiming / Spin Physics:
+;       * Top 3 pixels   : Sharp upward angle  (dy = -1)
+;       * Middle 4 pixels: Flat horizontal laser (dy = 0)
+;       * Bottom 3 pixels: Sharp downward angle (dy = +1)
+;   - 4 Selectable AI Difficulties (1=Easy, 2=Normal, 3=Hard, 4=Very Hard)
+;   - Dynamic Rally Acceleration in Very Hard Mode
+;   - Instant Match Restarts via R / Space or 1..4 anytime
+;   - Ultra-smooth 60 FPS Delta-Rendering (only paddle ends updated)
+;   - Flashing celebration & game over fail/victory states
 ; ==============================================================================
     bra main
 
@@ -17,6 +19,8 @@
 difficulty:    .word 2          ; 1=Easy, 2=Normal, 3=Hard, 4=Very Hard
 current_delay: .word 3800       ; Delay counter for speed control
 rally_count:   .word 0          ; Rallies in current point
+p1_score:      .word 0          ; First to 3 points wins!
+p2_score:      .word 0
 
 p1_y:          .word 25         ; Player Y (0 to 49)
 p1_old_y:      .word 25
@@ -27,8 +31,8 @@ ball_x:        .word 40         ; Ball position
 ball_y:        .word 30
 ball_old_x:    .word 40
 ball_old_y:    .word 30
-ball_dx:       .word 1          ; Ball velocity (+1 or -1)
-ball_dy:       .word 1
+ball_dx:       .word 1          ; Ball horizontal velocity (+1 or -1)
+ball_dy:       .word 1          ; Ball vertical velocity (-1, 0, or +1)
 
 bot_tick:      .word 0          ; Frame counter for bot handicap
 
@@ -39,7 +43,17 @@ main:
     leti sp, 0x10000000
 
 start_match:
-    ; 1. Reset game state variables
+    ; Reset Match Scores
+    leti r1, 0
+    store [p1_score], r1
+    store [p2_score], r1
+
+    ; Initial serve direction towards AI
+    leti r1, 1
+    store [ball_dx], r1
+
+serve_round:
+    ; 1. Reset Round State Variables
     leti r1, 25
     store [p1_y], r1
     store [p1_old_y], r1
@@ -54,7 +68,6 @@ start_match:
     store [ball_old_y], r1
 
     leti r1, 1
-    store [ball_dx], r1
     store [ball_dy], r1
 
     leti r1, 0
@@ -87,7 +100,7 @@ set_speed_hard:
 save_speed:
     store [current_delay], r1
 
-    ; 2. Clear Screen & Draw Initial Court
+    ; 2. Clear Screen & Draw Minimalist Court with Score Pips
     call clear_screen
     call draw_borders
 
@@ -264,10 +277,32 @@ check_collisions:
     addi r7, r6, 10
     bge  r2, r7, check_goal_left     ; Ball below paddle -> keep flying past!
 
-    ; Paddle 1 Deflection Bounce!
+    ; -------------------------------------------------------------
+    ; PADDLE 1 DEFLECTION & ANGLE PHYSICS
+    ; -------------------------------------------------------------
     leti r3, 1
     store [ball_dx], r3
     leti r1, 4
+
+    ; Check hit offset: delta = ball_y - p1_y (0 to 9)
+    sub  r8, r2, r6
+    leti r9, 2
+    ble  r8, r9, p1_slice_top        ; Top 3 pixels -> dy = -1
+    leti r9, 7
+    bge  r8, r9, p1_slice_bot        ; Bottom 3 pixels -> dy = +1
+    ; Middle 4 pixels -> dy = 0 (horizontal laser)
+    leti r4, 0
+    bra  save_p1_dy
+
+p1_slice_top:
+    subi r4, r0, 1
+    bra  save_p1_dy
+
+p1_slice_bot:
+    leti r4, 1
+
+save_p1_dy:
+    store [ball_dy], r4
     call on_rally_hit
     bra  render_frame
 
@@ -287,10 +322,32 @@ check_paddle_right:
     addi r7, r6, 10
     bge  r2, r7, check_goal_right    ; Ball below paddle -> keep flying past!
 
-    ; Paddle 2 Deflection Bounce!
-    subi r3, r0, 1
+    ; -------------------------------------------------------------
+    ; PADDLE 2 DEFLECTION & ANGLE PHYSICS
+    ; -------------------------------------------------------------
+    subi r3, r0, 1                   ; dx = -1
     store [ball_dx], r3
     leti r1, 75
+
+    ; Check hit offset: delta = ball_y - p2_y (0 to 9)
+    sub  r8, r2, r6
+    leti r9, 2
+    ble  r8, r9, p2_slice_top        ; Top 3 pixels -> dy = -1
+    leti r9, 7
+    bge  r8, r9, p2_slice_bot        ; Bottom 3 pixels -> dy = +1
+    ; Middle 4 pixels -> dy = 0 (horizontal laser)
+    leti r4, 0
+    bra  save_p2_dy
+
+p2_slice_top:
+    subi r4, r0, 1
+    bra  save_p2_dy
+
+p2_slice_bot:
+    leti r4, 1
+
+save_p2_dy:
+    store [ball_dy], r4
     call on_rally_hit
     bra  render_frame
 
@@ -338,8 +395,11 @@ render_frame:
 
     bra  game_loop
 
+; ==============================================================================
+; SCORING & ROUND LIFE CYCLE
+; ==============================================================================
 player_loses_goal:
-    ; Draw ball hitting back wall at x=0
+    ; Ball hit left wall (x=0) -> AI Scores!
     store [ball_x], r1
     store [ball_y], r2
     load r1, [ball_old_x]
@@ -350,11 +410,34 @@ player_loses_goal:
     load r2, [ball_y]
     leti r3, 0xFFFF0000
     call draw_pixel
-    call delay
-    bra  player_loses
+
+    ; Flash screen border RED for conceded point
+    leti r1, 0xFF000000
+    call flash_screen
+    call celebration_delay
+
+    ; Increment AI score
+    load r6, [p2_score]
+    addi r6, r6, 1
+    store [p2_score], r6
+
+    ; Check if AI reached 3 points (Match Defeat!)
+    leti r7, 3
+    bge  r6, r7, match_lost
+
+    ; Continue match: serve next round toward Player
+    subi r1, r0, 1              ; dx = -1
+    store [ball_dx], r1
+    bra  serve_round
+
+match_lost:
+    ; AI won 3 points -> Permanent FAIL STATE!
+    leti r1, 0xFF000000         ; RED
+    call flash_screen
+    bra  game_over_wait
 
 ai_loses_goal:
-    ; Draw ball hitting back wall at x=79
+    ; Ball hit right wall (x=79) -> Player Scores!
     store [ball_x], r1
     store [ball_y], r2
     load r1, [ball_old_x]
@@ -365,8 +448,31 @@ ai_loses_goal:
     load r2, [ball_y]
     leti r3, 0xFFFF0000
     call draw_pixel
-    call delay
-    bra  ai_loses
+
+    ; Flash screen border GREEN for scored point
+    leti r1, 0x00FF0000
+    call flash_screen
+    call celebration_delay
+
+    ; Increment Player score
+    load r6, [p1_score]
+    addi r6, r6, 1
+    store [p1_score], r6
+
+    ; Check if Player reached 3 points (Match Victory!)
+    leti r7, 3
+    bge  r6, r7, match_won
+
+    ; Continue match: serve next round toward AI
+    leti r1, 1                  ; dx = 1
+    store [ball_dx], r1
+    bra  serve_round
+
+match_won:
+    ; Player won 3 points -> Permanent VICTORY STATE!
+    leti r1, 0x00FF0000         ; GREEN
+    call flash_screen
+    bra  game_over_wait
 
 ; ==============================================================================
 ; DYNAMIC SPEED ACCELERATION (Very Hard Mode)
@@ -423,22 +529,6 @@ handle_key_diff4:
     bra  start_match
 
 ; ==============================================================================
-; FAIL STATE: Player missed -> Border RED, wait for restart!
-; ==============================================================================
-player_loses:
-    leti r1, 0xFF000000         ; RED (Loss)
-    call flash_screen
-    bra  game_over_wait
-
-; ==============================================================================
-; VICTORY STATE: AI missed -> Border GREEN, wait for restart!
-; ==============================================================================
-ai_loses:
-    leti r1, 0x00FF0000         ; GREEN (Win)
-    call flash_screen
-    bra  game_over_wait
-
-; ==============================================================================
 ; GAME OVER WAIT: Player can press R, Space, 1, 2, 3, 4, or Up/Down to restart!
 ; ==============================================================================
 game_over_wait:
@@ -449,7 +539,7 @@ game_over_wait:
 
     ; Check if 1, 2, 3, 4 was pressed
     leti r4, 11
-    blt  r2, r4, go_restart     ; Any movement/restart key -> restart!
+    blt  r2, r4, go_restart     ; Any movement/restart key -> restart match!
     leti r4, 14
     bgt  r2, r4, go_restart
 
@@ -503,19 +593,24 @@ clear_done:
     ret
 
 ; ==============================================================================
-; draw_borders: Draws top/bottom borders + difficulty indicators at top center
+; draw_borders: Top/Bottom borders + Minimalist LED Score Pips + Difficulty Dots
+; Top row (y=0) layout:
+;   x = 10, 12, 14 : Player 1 Score Pips (Cyan LEDs)
+;   x = 37, 39, 41, 43 : Difficulty Dots
+;   x = 65, 67, 69 : AI Score Pips (Magenta LEDs)
 ; ==============================================================================
 draw_borders:
     push lr
     push r6
     push r7
     push r8
+    push r9
 
     ; 1. Draw top (y=0) and bottom (y=59) borders in dark gray
     leti r6, 0                  ; x = 0
 border_loop:
     leti r7, 80
-    bge  r6, r7, border_dots
+    bge  r6, r7, border_scores
 
     mov  r1, r6
     leti r2, 0                  ; Top row
@@ -530,9 +625,43 @@ border_loop:
     addi r6, r6, 1
     bra  border_loop
 
-border_dots:
-    ; 2. Draw Difficulty Dots at top center (y=0)
-    ; Dot 1 (x=37) = Green (Easy)
+border_scores:
+    ; -------------------------------------------------------------
+    ; 2. Player 1 Score Pips (x=10, 12, 14, Cyan if scored)
+    ; -------------------------------------------------------------
+    load r8, [p1_score]
+
+    leti r1, 10
+    leti r2, 0
+    leti r3, 0x33333300         ; Unlit pip
+    leti r7, 1
+    blt  r8, r7, p1_draw_pip1
+    leti r3, 0x00FFFFFF         ; Lit Cyan pip
+p1_draw_pip1:
+    call draw_pixel
+
+    leti r1, 12
+    leti r2, 0
+    leti r3, 0x33333300
+    leti r7, 2
+    blt  r8, r7, p1_draw_pip2
+    leti r3, 0x00FFFFFF
+p1_draw_pip2:
+    call draw_pixel
+
+    leti r1, 14
+    leti r2, 0
+    leti r3, 0x33333300
+    leti r7, 3
+    blt  r8, r7, p1_draw_pip3
+    leti r3, 0x00FFFFFF
+p1_draw_pip3:
+    call draw_pixel
+
+    ; -------------------------------------------------------------
+    ; 3. Difficulty Indicators at top center (y=0)
+    ; -------------------------------------------------------------
+    ; Dot 1 (x=37) = Green
     leti r1, 37
     leti r2, 0
     leti r3, 0x00FF0000
@@ -540,33 +669,67 @@ border_dots:
 
     load r8, [difficulty]
     leti r7, 2
-    blt  r8, r7, borders_done
+    blt  r8, r7, border_p2_scores
 
-    ; Dot 2 (x=39) = Cyan (Normal)
+    ; Dot 2 (x=39) = Cyan
     leti r1, 39
     leti r2, 0
     leti r3, 0x00FFFFFF
     call draw_pixel
 
     leti r7, 3
-    blt  r8, r7, borders_done
+    blt  r8, r7, border_p2_scores
 
-    ; Dot 3 (x=41) = Yellow (Hard)
+    ; Dot 3 (x=41) = Yellow
     leti r1, 41
     leti r2, 0
     leti r3, 0xFFFF0000
     call draw_pixel
 
     leti r7, 4
-    blt  r8, r7, borders_done
+    blt  r8, r7, border_p2_scores
 
-    ; Dot 4 (x=43) = Red (Very Hard)
+    ; Dot 4 (x=43) = Red
     leti r1, 43
     leti r2, 0
     leti r3, 0xFF000000
     call draw_pixel
 
+border_p2_scores:
+    ; -------------------------------------------------------------
+    ; 4. AI Score Pips (x=65, 67, 69, Magenta if scored)
+    ; -------------------------------------------------------------
+    load r8, [p2_score]
+
+    leti r1, 65
+    leti r2, 0
+    leti r3, 0x33333300         ; Unlit pip
+    leti r7, 1
+    blt  r8, r7, p2_draw_pip1
+    leti r3, 0xFF00FF00         ; Lit Magenta pip
+p2_draw_pip1:
+    call draw_pixel
+
+    leti r1, 67
+    leti r2, 0
+    leti r3, 0x33333300
+    leti r7, 2
+    blt  r8, r7, p2_draw_pip2
+    leti r3, 0xFF00FF00
+p2_draw_pip2:
+    call draw_pixel
+
+    leti r1, 69
+    leti r2, 0
+    leti r3, 0x33333300
+    leti r7, 3
+    blt  r8, r7, p2_draw_pip3
+    leti r3, 0xFF00FF00
+p2_draw_pip3:
+    call draw_pixel
+
 borders_done:
+    pop  r9
     pop  r8
     pop  r7
     pop  r6
@@ -663,7 +826,7 @@ ends_done:
     ret
 
 ; ==============================================================================
-; draw_full_paddle: Draws all 10 pixels (used at startup/restart)
+; draw_full_paddle: Draws all 10 pixels (used at round start/restart)
 ; Inputs: r1 = x, r2 = y_start, r3 = color
 ; ==============================================================================
 draw_full_paddle:
@@ -710,7 +873,7 @@ draw_pixel:
     ret
 
 ; ==============================================================================
-; delay: dynamic speed delay
+; delay routines
 ; ==============================================================================
 delay:
     load r10, [current_delay]
@@ -724,4 +887,11 @@ small_delay:
 sdelay_loop:
     subi r10, r10, 1
     bgtz r10, sdelay_loop
+    ret
+
+celebration_delay:
+    leti r10, 80000
+cdelay_loop:
+    subi r10, r10, 1
+    bgtz r10, cdelay_loop
     ret
