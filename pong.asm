@@ -275,28 +275,31 @@ check_collisions:
 
     ; --- Ball Moving LEFT towards Player 1 ---
     leti r5, 3
-    bne  r1, r5, check_goal_left
+    bgt  r1, r5, render_frame        ; x > 3 -> not at paddle yet
+    leti r5, 2
+    blt  r1, r5, check_goal_left     ; x < 2 -> past paddle, check for goal
 
-    ; Ball is at x == 3: Check if Paddle 1 intercepts!
+    ; Ball is at x == 2 or x == 3: check Paddle 1 collision!
     load r6, [p1_y]
-    blt  r2, r6, check_goal_left     ; Ball above paddle -> keep flying past!
-    addi r7, r6, 10
-    bge  r2, r7, check_goal_left     ; Ball below paddle -> keep flying past!
+    subi r7, r6, 1                   ; p1_y - 1 (top corner tolerance)
+    blt  r2, r7, check_goal_left     ; ball completely above paddle
+    addi r7, r6, 10                  ; p1_y + 10 (bottom corner tolerance)
+    bgt  r2, r7, check_goal_left     ; ball completely below paddle
 
     ; -------------------------------------------------------------
     ; PADDLE 1 DEFLECTION & ANGLE PHYSICS
     ; -------------------------------------------------------------
     leti r3, 1
     store [ball_dx], r3
-    leti r1, 4
+    leti r1, 4                       ; Push ball cleanly out in front
 
-    ; Check hit offset: delta = ball_y - p1_y (0 to 9)
+    ; Check hit offset: delta = ball_y - p1_y
     sub  r8, r2, r6
     leti r9, 2
-    ble  r8, r9, p1_slice_top        ; Top 3 pixels -> dy = -1
+    ble  r8, r9, p1_slice_top        ; Top slice -> dy = -1
     leti r9, 7
-    bge  r8, r9, p1_slice_bot        ; Bottom 3 pixels -> dy = +1
-    ; Middle 4 pixels -> dy = 0 (horizontal laser)
+    bge  r8, r9, p1_slice_bot        ; Bottom slice -> dy = +1
+    ; Middle slice -> dy = 0 (horizontal laser)
     leti r4, 0
     bra  save_p1_dy
 
@@ -312,7 +315,6 @@ save_p1_dy:
     call on_rally_hit
 
     ; --- AI DYNAMIC SHOT SELECTION ---
-    ; Randomize bot hit target offset for this rally (top, flat, or bottom)
     load r8, [bot_tick]
     load r9, [ball_y]
     muli r9, r9, 3
@@ -322,7 +324,7 @@ save_p1_dy:
     beq  r8, r9, pick_bot_top
     leti r9, 1
     beq  r8, r9, pick_bot_bot
-    ; Remainder 2: center shot (laser flat return)
+    ; Remainder 2: center flat shot
     leti r9, 4
     bra  set_bot_offset
 
@@ -346,28 +348,31 @@ check_goal_left:
 check_paddle_right:
     ; --- Ball Moving RIGHT towards AI Bot ---
     leti r5, 76
-    bne  r1, r5, check_goal_right
+    blt  r1, r5, render_frame        ; x < 76 -> not at paddle yet
+    leti r5, 77
+    bgt  r1, r5, check_goal_right    ; x > 77 -> past paddle, check for goal
 
-    ; Ball is at x == 76: Check if Paddle 2 intercepts!
+    ; Ball is at x == 76 or x == 77: check Paddle 2 collision!
     load r6, [p2_y]
-    blt  r2, r6, check_goal_right    ; Ball above paddle -> keep flying past!
-    addi r7, r6, 10
-    bge  r2, r7, check_goal_right    ; Ball below paddle -> keep flying past!
+    subi r7, r6, 1                   ; p2_y - 1 (top corner tolerance)
+    blt  r2, r7, check_goal_right    ; ball completely above paddle
+    addi r7, r6, 10                  ; p2_y + 10 (bottom corner tolerance)
+    bgt  r2, r7, check_goal_right    ; ball completely below paddle
 
     ; -------------------------------------------------------------
     ; PADDLE 2 DEFLECTION & ANGLE PHYSICS
     ; -------------------------------------------------------------
     subi r3, r0, 1                   ; dx = -1
     store [ball_dx], r3
-    leti r1, 75
+    leti r1, 75                      ; Push ball cleanly out in front
 
-    ; Check hit offset: delta = ball_y - p2_y (0 to 9)
+    ; Check hit offset: delta = ball_y - p2_y
     sub  r8, r2, r6
     leti r9, 2
-    ble  r8, r9, p2_slice_top        ; Top 3 pixels -> dy = -1
+    ble  r8, r9, p2_slice_top        ; Top slice -> dy = -1
     leti r9, 7
-    bge  r8, r9, p2_slice_bot        ; Bottom 3 pixels -> dy = +1
-    ; Middle 4 pixels -> dy = 0 (horizontal laser)
+    bge  r8, r9, p2_slice_bot        ; Bottom slice -> dy = +1
+    ; Middle slice -> dy = 0 (horizontal laser)
     leti r4, 0
     bra  save_p2_dy
 
