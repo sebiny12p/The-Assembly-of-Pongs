@@ -1,95 +1,212 @@
 ; ==============================================================================
-; THE ASSEMBLY OF PONGS - HIGH PERFORMANCE & GAME OVER STATES
+; THE ASSEMBLY OF PONGS - HIGH PERFORMANCE RETRO ARCADE
 ; Player 1 (Left, Cyan): W / S or Up / Down arrow keys
-; Bot AI (Right, Magenta): Beatable AI (tracks only on right court with speed limit)
-; Optimization: Delta-rendering (only updates paddle ends, 60 FPS smooth)
-; Fail State: Screen turns RED if player loses, GREEN if AI loses!
+; Bot AI (Right, Magenta): 4 Difficulty levels (Easy, Normal, Hard, Very Hard)
+; Restart Match: Press R / Space anytime or after game over
+; Change Difficulty: Press 1, 2, 3, or 4 anytime or at game over
+;   - 1 = Easy      : Sluggish bot, narrow reaction zone, slow pace
+;   - 2 = Normal    : Balanced AI, half-court tracking
+;   - 3 = Hard      : Fast bot, full-court tracking
+;   - 4 = Very Hard : Aggressive bot + DYNAMIC SPEED ACCELERATION on every rally!
+; Rendering: Ultra-smooth delta-rendering (updates paddle ends only, 60 FPS)
+; Win / Fail States: Border flashes RED (Loss) or GREEN (Win), press R to replay!
 ; ==============================================================================
     bra main
 
-; Memory variables
-p1_y:      .word 25         ; Player Y (0 to 49)
-p1_old_y:  .word 25
-p2_y:      .word 25         ; Bot Y
-p2_old_y:  .word 25
+; --- Memory Variables ---
+difficulty:    .word 2          ; 1=Easy, 2=Normal, 3=Hard, 4=Very Hard
+current_delay: .word 3800       ; Delay counter for speed control
+rally_count:   .word 0          ; Rallies in current point
 
-ball_x:    .word 40         ; Ball position
-ball_y:    .word 30
-ball_old_x:.word 40
-ball_old_y:.word 30
-ball_dx:   .word 1          ; Ball velocity
-ball_dy:   .word 1
+p1_y:          .word 25         ; Player Y (0 to 49)
+p1_old_y:      .word 25
+p2_y:          .word 25         ; Bot Y
+p2_old_y:      .word 25
 
-bot_tick:  .word 0          ; Frame counter for AI speed handicap
+ball_x:        .word 40         ; Ball position
+ball_y:        .word 30
+ball_old_x:    .word 40
+ball_old_y:    .word 30
+ball_dx:       .word 1          ; Ball velocity (+1 or -1)
+ball_dy:       .word 1
 
+bot_tick:      .word 0          ; Frame counter for bot handicap
+
+; ==============================================================================
+; MAIN ENTRY POINT
+; ==============================================================================
 main:
     leti sp, 0x10000000
 
-    ; --- 1. INITIAL DRAW: Draw full paddles at startup ---
+start_match:
+    ; 1. Reset game state variables
+    leti r1, 25
+    store [p1_y], r1
+    store [p1_old_y], r1
+    store [p2_y], r1
+    store [p2_old_y], r1
+
+    leti r1, 40
+    store [ball_x], r1
+    store [ball_old_x], r1
+    leti r1, 30
+    store [ball_y], r1
+    store [ball_old_y], r1
+
+    leti r1, 1
+    store [ball_dx], r1
+    store [ball_dy], r1
+
+    leti r1, 0
+    store [bot_tick], r1
+    store [rally_count], r1
+
+    ; Set initial speed delay based on difficulty
+    load r2, [difficulty]
+    leti r3, 1
+    beq  r2, r3, set_speed_easy
+    leti r3, 2
+    beq  r2, r3, set_speed_normal
+    leti r3, 3
+    beq  r2, r3, set_speed_hard
+    ; Difficulty 4 (Very Hard)
+    leti r1, 3500
+    bra  save_speed
+
+set_speed_easy:
+    leti r1, 4600
+    bra  save_speed
+
+set_speed_normal:
+    leti r1, 3800
+    bra  save_speed
+
+set_speed_hard:
+    leti r1, 2800
+
+save_speed:
+    store [current_delay], r1
+
+    ; 2. Clear Screen & Draw Initial Court
+    call clear_screen
+    call draw_borders
+
+    ; 3. Draw initial paddles
     leti r1, 2
     load r2, [p1_y]
-    leti r3, 0x00FFFFFF     ; Cyan
+    leti r3, 0x00FFFFFF         ; Cyan
     call draw_full_paddle
 
     leti r1, 77
     load r2, [p2_y]
-    leti r3, 0xFF00FF00     ; Magenta
+    leti r3, 0xFF00FF00         ; Magenta
     call draw_full_paddle
 
+; ==============================================================================
+; MAIN GAME LOOP
+; ==============================================================================
 game_loop:
-    ; -------------------------------------------------------------
-    ; 2. READ PLAYER INPUT (MMIO at 0xC0000000)
-    ; Up / W returns -1 (0xFFFFFFFF), Down / S returns +1
-    ; -------------------------------------------------------------
+    ; --------------------------------------------------------------------------
+    ; 1. READ INPUT CONTROLLER (MMIO at 0xC0000000)
+    ; Up / W = -1, Down / S = 1, Restart (R/Space) = 2, Keys 1..4 = 11..14
+    ; --------------------------------------------------------------------------
     leti r1, 0xC0000000
     load r2, [r1]
 
+    ; Check Restart (R or Space)
+    leti r4, 2
+    beq  r2, r4, handle_key_restart
+
+    ; Check Difficulty 1 (Easy)
+    leti r4, 11
+    beq  r2, r4, handle_key_diff1
+
+    ; Check Difficulty 2 (Normal)
+    leti r4, 12
+    beq  r2, r4, handle_key_diff2
+
+    ; Check Difficulty 3 (Hard)
+    leti r4, 13
+    beq  r2, r4, handle_key_diff3
+
+    ; Check Difficulty 4 (Very Hard)
+    leti r4, 14
+    beq  r2, r4, handle_key_diff4
+
+    ; Check Paddle Movement
     load r3, [p1_y]
     store [p1_old_y], r3
 
-    subi r4, r0, 1          ; r4 = -1
+    subi r4, r0, 1              ; r4 = -1 (UP)
     bne  r2, r4, check_down
     leti r5, 1
-    ble  r3, r5, apply_bot  ; top bound
-    subi r3, r3, 1          ; player moves UP
+    ble  r3, r5, apply_bot      ; Top wall bound
+    subi r3, r3, 1              ; Player moves UP
     bra  save_p1
 
 check_down:
-    leti r4, 1
+    leti r4, 1                  ; r4 = 1 (DOWN)
     bne  r2, r4, apply_bot
     leti r5, 49
-    bge  r3, r5, apply_bot  ; bottom bound
-    addi r3, r3, 1          ; player moves DOWN
+    bge  r3, r5, apply_bot      ; Bottom wall bound
+    addi r3, r3, 1              ; Player moves DOWN
 
 save_p1:
     store [p1_y], r3
 
 apply_bot:
-    ; -------------------------------------------------------------
-    ; 3. BEATABLE BOT AI
-    ; Handicap 1: Bot only reacts when ball is moving toward it (ball_dx > 0)
-    ; Handicap 2: Bot only reacts on right half of court (ball_x >= 35)
-    ; Handicap 3: Bot only moves on alternate frames (speed cap)
-    ; -------------------------------------------------------------
+    ; --------------------------------------------------------------------------
+    ; 2. BOT AI WITH CONFIGURABLE DIFFICULTY
+    ; --------------------------------------------------------------------------
     load r6, [p2_y]
     store [p2_old_y], r6
 
     load r1, [ball_dx]
-    blez r1, move_ball      ; If ball moving away, bot doesn't track!
+    blez r1, move_ball          ; If ball moving away, bot doesn't track!
 
     load r1, [ball_x]
-    leti r5, 35
-    blt  r1, r5, move_ball  ; If ball on left court, bot doesn't track!
+    load r7, [difficulty]
 
-    ; Alternate frame check (bot moves at half speed!)
+    ; --- Difficulty 1: Easy ---
+    leti r8, 1
+    bne  r7, r8, check_diff_2
+    leti r5, 52                 ; Only track when ball is close
+    blt  r1, r5, move_ball
     load r8, [bot_tick]
     addi r8, r8, 1
     store [bot_tick], r8
-    modi r8, r8, 2
-    bnez r8, move_ball      ; Skip move on odd frames!
+    modi r8, r8, 3              ; Moves 1 out of 3 frames (sluggish)
+    bnez r8, move_ball
+    bra  bot_track
 
+check_diff_2:
+    ; --- Difficulty 2: Normal ---
+    leti r8, 2
+    bne  r7, r8, check_diff_3
+    leti r5, 35                 ; Half-court tracking
+    blt  r1, r5, move_ball
+    load r8, [bot_tick]
+    addi r8, r8, 1
+    store [bot_tick], r8
+    modi r8, r8, 2              ; Moves 1 out of 2 frames
+    bnez r8, move_ball
+    bra  bot_track
+
+check_diff_3:
+    ; --- Difficulty 3: Hard ---
+    leti r8, 3
+    bne  r7, r8, check_diff_4
+    leti r5, 15                 ; Reacts almost immediately
+    blt  r1, r5, move_ball
+    bra  bot_track
+
+check_diff_4:
+    ; --- Difficulty 4: Very Hard ---
+    ; Full court tracking + moves every frame!
+
+bot_track:
     load r7, [ball_y]
-    addi r8, r6, 4          ; center of bot paddle
+    addi r8, r6, 4              ; Center of bot paddle
     blt  r7, r8, bot_up
     bgt  r7, r8, bot_down
     bra  move_ball
@@ -109,9 +226,9 @@ save_bot:
     store [p2_y], r6
 
 move_ball:
-    ; -------------------------------------------------------------
-    ; 4. MOVE BALL
-    ; -------------------------------------------------------------
+    ; --------------------------------------------------------------------------
+    ; 3. MOVE BALL
+    ; --------------------------------------------------------------------------
     load r1, [ball_x]
     load r2, [ball_y]
     store [ball_old_x], r1
@@ -122,7 +239,7 @@ move_ball:
     add  r1, r1, r3
     add  r2, r2, r4
 
-    ; Bounce Top / Bottom Walls (1 to 58)
+    ; Bounce Top / Bottom Walls (y <= 1 or y >= 58)
     leti r5, 1
     ble  r2, r5, bounce_y
     leti r5, 58
@@ -130,116 +247,312 @@ move_ball:
     bra  check_paddle1
 
 bounce_y:
-    sub  r4, r0, r4         ; negate dy
+    sub  r4, r0, r4             ; Negate ball_dy
     store [ball_dy], r4
 
 check_paddle1:
-    ; -------------------------------------------------------------
-    ; 5. PADDLE 1 COLLISION (LEFT: x <= 3)
-    ; -------------------------------------------------------------
+    ; --------------------------------------------------------------------------
+    ; 4. PADDLE 1 COLLISION (LEFT: x <= 3)
+    ; --------------------------------------------------------------------------
     leti r5, 3
     bgt  r1, r5, check_paddle2
 
     load r6, [p1_y]
-    blt  r2, r6, player_loses   ; Ball went past paddle -> FAIL STATE!
+    blt  r2, r6, player_loses   ; Ball past paddle -> FAIL STATE!
     addi r7, r6, 10
-    bgt  r2, r7, player_loses   ; Ball went past paddle -> FAIL STATE!
+    bgt  r2, r7, player_loses   ; Ball past paddle -> FAIL STATE!
 
     ; Deflection bounce!
     leti r3, 1
     store [ball_dx], r3
     leti r1, 4
+
+    ; Rally speedup in Very Hard mode!
+    call on_rally_hit
     bra  store_ball
 
 check_paddle2:
-    ; -------------------------------------------------------------
-    ; 6. PADDLE 2 COLLISION (RIGHT: x >= 76)
-    ; -------------------------------------------------------------
+    ; --------------------------------------------------------------------------
+    ; 5. PADDLE 2 COLLISION (RIGHT: x >= 76)
+    ; --------------------------------------------------------------------------
     leti r5, 76
     blt  r1, r5, store_ball
 
     load r6, [p2_y]
-    blt  r2, r6, ai_loses       ; Ball went past AI -> VICTORY STATE!
+    blt  r2, r6, ai_loses       ; Ball past AI -> VICTORY STATE!
     addi r7, r6, 10
-    bgt  r2, r7, ai_loses       ; Ball went past AI -> VICTORY STATE!
+    bgt  r2, r7, ai_loses       ; Ball past AI -> VICTORY STATE!
 
     ; Deflection bounce!
     subi r3, r0, 1
     store [ball_dx], r3
     leti r1, 75
 
+    ; Rally speedup in Very Hard mode!
+    call on_rally_hit
+
 store_ball:
     store [ball_x], r1
     store [ball_y], r2
 
-    ; -------------------------------------------------------------
-    ; 7. ULTRA-SMOOTH DELTA RENDERING
+    ; --------------------------------------------------------------------------
+    ; 6. ULTRA-SMOOTH DELTA RENDERING
     ; Only updates pixels that actually changed!
-    ; -------------------------------------------------------------
-    ; 1. Erase old ball
+    ; --------------------------------------------------------------------------
+    ; Erase old ball
     load r1, [ball_old_x]
     load r2, [ball_old_y]
-    leti r3, 0x00000000     ; Black
+    leti r3, 0x00000000         ; Black
     call draw_pixel
 
-    ; 2. Delta-update Paddle 1 (X = 2)
+    ; Delta-update Paddle 1 (X = 2)
     leti r1, 2
     load r2, [p1_old_y]
     load r3, [p1_y]
-    leti r4, 0x00FFFFFF     ; Cyan
+    leti r4, 0x00FFFFFF         ; Cyan
     call update_paddle_ends
 
-    ; 3. Delta-update Paddle 2 (X = 77)
+    ; Delta-update Paddle 2 (X = 77)
     leti r1, 77
     load r2, [p2_old_y]
     load r3, [p2_y]
-    leti r4, 0xFF00FF00     ; Magenta
+    leti r4, 0xFF00FF00         ; Magenta
     call update_paddle_ends
 
-    ; 4. Draw new ball
+    ; Draw new ball
     load r1, [ball_x]
     load r2, [ball_y]
-    leti r3, 0xFFFF0000     ; Yellow
+    leti r3, 0xFFFF0000         ; Yellow
     call draw_pixel
 
+    ; Frame delay
     call delay
 
     bra  game_loop
 
 ; ==============================================================================
-; FAIL STATE: Player missed! Fill screen border with RED & halt!
+; DYNAMIC SPEED ACCELERATION (Very Hard Mode)
+; ==============================================================================
+on_rally_hit:
+    push lr
+    push r6
+    push r7
+    load r6, [difficulty]
+    leti r7, 4
+    bne  r6, r7, rally_done     ; Only accelerate in Very Hard mode!
+
+    load r6, [current_delay]
+    leti r7, 800                ; Minimum delay floor (hyper speed!)
+    ble  r6, r7, rally_done
+    subi r6, r6, 200            ; Accelerate speed with each hit!
+    store [current_delay], r6
+
+rally_done:
+    pop  r7
+    pop  r6
+    pop  lr
+    ret
+
+; ==============================================================================
+; DIFFICULTY / RESTART HOTKEY HANDLERS
+; ==============================================================================
+handle_key_restart:
+    call debounce_key
+    bra  start_match
+
+handle_key_diff1:
+    leti r5, 1
+    store [difficulty], r5
+    call debounce_key
+    bra  start_match
+
+handle_key_diff2:
+    leti r5, 2
+    store [difficulty], r5
+    call debounce_key
+    bra  start_match
+
+handle_key_diff3:
+    leti r5, 3
+    store [difficulty], r5
+    call debounce_key
+    bra  start_match
+
+handle_key_diff4:
+    leti r5, 4
+    store [difficulty], r5
+    call debounce_key
+    bra  start_match
+
+; ==============================================================================
+; FAIL STATE: Player missed -> Border RED, wait for restart!
 ; ==============================================================================
 player_loses:
-    leti r1, 0xFF000000     ; RED (Loss)
+    leti r1, 0xFF000000         ; RED (Loss)
     call flash_screen
-    bra  +0                 ; HALT (Game Over - You Lost!)
+    bra  game_over_wait
 
 ; ==============================================================================
-; VICTORY STATE: AI missed! Fill screen border with GREEN & halt!
+; VICTORY STATE: AI missed -> Border GREEN, wait for restart!
 ; ==============================================================================
 ai_loses:
-    leti r1, 0x00FF0000     ; GREEN (Win)
+    leti r1, 0x00FF0000         ; GREEN (Win)
     call flash_screen
-    bra  +0                 ; HALT (Game Over - You Won!)
+    bra  game_over_wait
 
 ; ==============================================================================
-; flash_screen: paints entire top and bottom borders with color in r1
+; GAME OVER WAIT: Player can press R, Space, 1, 2, 3, 4, or Up/Down to restart!
+; ==============================================================================
+game_over_wait:
+    leti r1, 0xC0000000
+    load r2, [r1]
+
+    beqz r2, go_idle            ; No key pressed yet
+
+    ; Check if 1, 2, 3, 4 was pressed
+    leti r4, 11
+    blt  r2, r4, go_restart     ; Any movement/restart key -> restart!
+    leti r4, 14
+    bgt  r2, r4, go_restart
+
+    ; Key was 11, 12, 13, or 14 -> Update difficulty!
+    subi r5, r2, 10
+    store [difficulty], r5
+
+go_restart:
+    call debounce_key
+    bra  start_match
+
+go_idle:
+    call small_delay
+    bra  game_over_wait
+
+; ==============================================================================
+; debounce_key: Waits until key is released
+; ==============================================================================
+debounce_key:
+    push lr
+    push r1
+    push r2
+    leti r1, 0xC0000000
+debounce_loop:
+    load r2, [r1]
+    bnez r2, debounce_loop
+    pop  r2
+    pop  r1
+    pop  lr
+    ret
+
+; ==============================================================================
+; clear_screen: Fills 80x60 framebuffer with black
+; ==============================================================================
+clear_screen:
+    push r1
+    push r2
+    push r3
+    leti r1, 0xB0000000
+    leti r2, 0xB0004B00         ; 80 * 60 * 4 = 19200 = 0x4B00
+    leti r3, 0
+clear_loop:
+    bge  r1, r2, clear_done
+    store [r1], r3
+    addi r1, r1, 4
+    bra  clear_loop
+clear_done:
+    pop  r3
+    pop  r2
+    pop  r1
+    ret
+
+; ==============================================================================
+; draw_borders: Draws top/bottom borders + difficulty indicators at top center
+; ==============================================================================
+draw_borders:
+    push lr
+    push r6
+    push r7
+    push r8
+
+    ; 1. Draw top (y=0) and bottom (y=59) borders in dark gray
+    leti r6, 0                  ; x = 0
+border_loop:
+    leti r7, 80
+    bge  r6, r7, border_dots
+
+    mov  r1, r6
+    leti r2, 0                  ; Top row
+    leti r3, 0x22222200         ; Dark gray border
+    call draw_pixel
+
+    mov  r1, r6
+    leti r2, 59                 ; Bottom row
+    leti r3, 0x22222200
+    call draw_pixel
+
+    addi r6, r6, 1
+    bra  border_loop
+
+border_dots:
+    ; 2. Draw Difficulty Dots at top center (y=0)
+    ; Dot 1 (x=37) = Green (Easy)
+    leti r1, 37
+    leti r2, 0
+    leti r3, 0x00FF0000
+    call draw_pixel
+
+    load r8, [difficulty]
+    leti r7, 2
+    blt  r8, r7, borders_done
+
+    ; Dot 2 (x=39) = Cyan (Normal)
+    leti r1, 39
+    leti r2, 0
+    leti r3, 0x00FFFFFF
+    call draw_pixel
+
+    leti r7, 3
+    blt  r8, r7, borders_done
+
+    ; Dot 3 (x=41) = Yellow (Hard)
+    leti r1, 41
+    leti r2, 0
+    leti r3, 0xFFFF0000
+    call draw_pixel
+
+    leti r7, 4
+    blt  r8, r7, borders_done
+
+    ; Dot 4 (x=43) = Red (Very Hard)
+    leti r1, 43
+    leti r2, 0
+    leti r3, 0xFF000000
+    call draw_pixel
+
+borders_done:
+    pop  r8
+    pop  r7
+    pop  r6
+    pop  lr
+    ret
+
+; ==============================================================================
+; flash_screen: Paints entire top and bottom borders with color in r1
 ; ==============================================================================
 flash_screen:
     push lr
     push r6
     push r7
-    mov  r6, r1             ; color
-    leti r7, 0              ; x = 0
+    mov  r6, r1                 ; Color
+    leti r7, 0                  ; x = 0
 flash_loop:
     leti r8, 80
     bge  r7, r8, flash_done
     mov  r1, r7
-    leti r2, 0              ; top row
+    leti r2, 0                  ; Top row
     mov  r3, r6
     call draw_pixel
     mov  r1, r7
-    leti r2, 59             ; bottom row
+    leti r2, 59                 ; Bottom row
     mov  r3, r6
     call draw_pixel
     addi r7, r7, 1
@@ -252,11 +565,7 @@ flash_done:
 
 ; ==============================================================================
 ; update_paddle_ends: Only draws 1 pixel ON and 1 pixel OFF!
-; Inputs:
-;   r1 = x
-;   r2 = old_y
-;   r3 = new_y
-;   r4 = paddle_color
+; Inputs: r1 = x, r2 = old_y, r3 = new_y, r4 = paddle_color
 ; ==============================================================================
 update_paddle_ends:
     push lr
@@ -265,25 +574,25 @@ update_paddle_ends:
     push r8
     push r9
 
-    beq  r2, r3, ends_done  ; If paddle didn't move, write 0 pixels!
+    beq  r2, r3, ends_done      ; If paddle didn't move, write 0 pixels!
 
     blt  r3, r2, paddle_moved_up
 
     ; --- PADDLE MOVED DOWN (new_y > old_y) ---
-    ; Erase old top pixel: (x, old_y) -> Black
     mov  r6, r1
     mov  r7, r2
     mov  r8, r3
     mov  r9, r4
 
+    ; Erase old top pixel: (x, old_y) -> Black
     mov  r1, r6
-    mov  r2, r7             ; old_y
+    mov  r2, r7
     leti r3, 0x00000000
     call draw_pixel
 
     ; Draw new bottom pixel: (x, new_y + 9) -> paddle_color
     mov  r1, r6
-    addi r2, r8, 9          ; new_y + 9
+    addi r2, r8, 9
     mov  r3, r9
     call draw_pixel
     bra  ends_done
@@ -297,13 +606,13 @@ paddle_moved_up:
 
     ; Draw new top pixel: (x, new_y) -> paddle_color
     mov  r1, r6
-    mov  r2, r8             ; new_y
+    mov  r2, r8
     mov  r3, r9
     call draw_pixel
 
     ; Erase old bottom pixel: (x, old_y + 9) -> Black
     mov  r1, r6
-    addi r2, r7, 9          ; old_y + 9
+    addi r2, r7, 9
     leti r3, 0x00000000
     call draw_pixel
 
@@ -316,7 +625,7 @@ ends_done:
     ret
 
 ; ==============================================================================
-; draw_full_paddle: draws all 10 pixels (used only once at startup)
+; draw_full_paddle: Draws all 10 pixels (used at startup/restart)
 ; Inputs: r1 = x, r2 = y_start, r3 = color
 ; ==============================================================================
 draw_full_paddle:
@@ -363,11 +672,18 @@ draw_pixel:
     ret
 
 ; ==============================================================================
-; delay: tuned for smooth 60 FPS
+; delay: dynamic speed delay
 ; ==============================================================================
 delay:
-    leti r10, 4000
+    load r10, [current_delay]
 delay_loop:
     subi r10, r10, 1
     bgtz r10, delay_loop
+    ret
+
+small_delay:
+    leti r10, 2000
+sdelay_loop:
+    subi r10, r10, 1
+    bgtz r10, sdelay_loop
     ret

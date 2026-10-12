@@ -108,8 +108,14 @@ def gui_loop(xres,yres,data,key_state=None):
         def on_kd(e):
             if e.keysym in ['Up', 'w', 'W']: key_state.value = -1
             elif e.keysym in ['Down', 's', 'S']: key_state.value = 1
+            elif e.keysym in ['r', 'R', 'space', 'Return']: key_state.value = 2
+            elif e.keysym in ['1', 'KP_1']: key_state.value = 11
+            elif e.keysym in ['2', 'KP_2']: key_state.value = 12
+            elif e.keysym in ['3', 'KP_3']: key_state.value = 13
+            elif e.keysym in ['4', 'KP_4']: key_state.value = 14
         def on_ku(e):
-            if e.keysym in ['Up', 'Down', 'w', 's', 'W', 'S']: key_state.value = 0
+            if e.keysym in ['Up', 'Down', 'w', 's', 'W', 'S', 'r', 'R', 'space', 'Return', '1', '2', '3', '4', 'KP_1', 'KP_2', 'KP_3', 'KP_4']:
+                key_state.value = 0
         gui.bind('<KeyPress>', on_kd)
         gui.bind('<KeyRelease>', on_ku)
 
